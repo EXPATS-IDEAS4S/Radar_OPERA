@@ -1,4 +1,5 @@
 import os
+import pdb
 import boto3
 import logging
 import h5py
@@ -16,22 +17,23 @@ from pyproj import Proj, Transformer
 import wradlib as wrl
 
 
-def open_with_wrl(fpath, output_path):
-    f = wrl.util.get_wradlib_data_file(fpath)
+def open_with_wrl(fpath):
+    f = wrxl.util.get_wradlib_data_file(fpath)
     fcontent = wrl.io.read_opera_hdf5(f)
     # which keyswords can be used to access the content?
     print(fcontent.keys())
     # print the entire content including values of data and metadata
     # (numpy arrays will not be entirely printed)
-    print(fcontent["dataset1/data1/data"])
-    fig = plt.figure(figsize=(10, 10))
+    #print(fcontent["dataset1/data1/data"])
+    #fig = plt.figure(figsize=(10, 10))
     da = wrl.georef.create_xarray_dataarray(
         fcontent["dataset1/data1/data"]
     ).wrl.georef.georeference()
-    im = da.wrl.vis.plot(fig=fig, crs="cg")
-    fig.savefig(output_path+'prova.png')
-    plt.close()
-
+    #im = da.wrl.vis.plot(fig=fig, crs="cg")
+    #fig.savefig(output_path+'prova.png')
+    #plt.close()
+    return da  # Return the xarray DataArray for further processing or visualization
+#
 
 
 def list_s3_files(s3, bucket, prefix):
@@ -144,21 +146,21 @@ def read_h5_from_s3(s3, bucket, file_key):
             ul_lon, ul_lat = where_data.attrs['UL_lon'], where_data.attrs['UL_lat']
             ur_lon, ur_lat = where_data.attrs['UR_lon'], where_data.attrs['UR_lat']
             lr_lon, lr_lat = where_data.attrs['LR_lon'], where_data.attrs['LR_lat']
+                        
 
             # ---- Generate Latitude & Longitude Grids ----
             lats = np.linspace(ul_lat, ll_lat, int(ysize))  # Latitude from upper to lower
             lons = np.linspace(ul_lon, ur_lon, int(xsize))  # Longitude from left to right
             #print(lats)
-            #print(lons)
 
             # Create 2D meshgrid
             LAT, LON = np.meshgrid(lats, lons, indexing='ij')
-            print(LON)
-            print(LAT)
+            #print(LON)
+            #print(LAT)
 
             # ---- Projection Definition ----
             proj_def = where_data.attrs.get('projdef', '').decode('utf-8') if isinstance(where_data.attrs.get('projdef', ''), bytes) else where_data.attrs.get('projdef', '')
-            print(proj_def)
+            #print(proj_def)
             #exit()
             # ---- Convert to WGS84 if needed ----
             #lon_corrected, lat_corrected = reproject_to_wgs84(proj_def, LON, LAT)
@@ -256,17 +258,34 @@ def plot_data(dataset, output_dir):
     # Generate output filename
     output_path = os.path.join(output_dir, f"opera_reflectivity_{timestamp}.png")
 
-    # Set up the figure
-    proj = ccrs.LambertAzimuthalEqualArea(central_longitude=10, central_latitude=55)
+    # build string from timestamp
+    timestamp_str = str(timestamp)[:19].replace(":", "").replace("-", "").replace("T", "_")
+    output_path = os.path.join(output_dir, f"{timestamp_str}_OPERA_reflectivity.png")  
     
+    # Set up the figure
+    #proj = ccrs.LambertAzimuthalEqualArea(central_longitude=10, central_latitude=55)
+    proj = ccrs.PlateCarree()  # Use Plate Carree projection for simplicity
+
     fig, ax = plt.subplots(figsize=(8, 6), subplot_kw={'projection': proj})
 
     # Get reflectivity data
     reflectivity = dataset['reflectivity']
-    LAT = dataset['latitude']
-    LON = dataset['longitude']
     
-    mesh = ax.pcolormesh(LON, LAT, reflectivity, transform=ccrs.PlateCarree(), cmap='turbo', shading='auto')
+    # mask reflectivity data smaller than Ze_min 
+    Ze_min = -10  # Example threshold
+    reflectivity = reflectivity.where(reflectivity >= Ze_min, np.nan)
+    
+    LAT = dataset['lat']
+    LON = dataset['lon']
+    
+    mesh = ax.pcolormesh(LON, 
+                         LAT,
+                         reflectivity,
+                         transform=ccrs.PlateCarree(), 
+                         cmap='turbo',
+                         shading='auto',
+                         vmin=-10, 
+                         vmax=50)
 
     # Add coastlines and borders
     ax.add_feature(cfeature.COASTLINE, linewidth=1)
@@ -295,3 +314,203 @@ def plot_data(dataset, output_dir):
     plt.close()
 
     print(f"Plot saved to {output_path}")
+    
+    
+    
+    
+
+
+def plot_msg(lons, lats, variable, label, cmap, cbar_title, domain, path_out, key, back_transparent, vmin, vmax):
+    """
+    plot map of the variable over the defined domain
+
+    Args:
+        lons (array): longitude values
+        lats (array): latitudes 
+        variable (matrix): variable to plot
+        label (string): string for plot filename
+        cmap (colormap): color map 
+        cbar_title (string): title for color bar
+        domain (array): minlon, maxlon, minlat, maxlat     
+
+        path_out (string): path where to save the plot
+        key (string): string possible "expats" or "dfg"
+        back_transparent (boolean): True or False - true means transparent background
+        vmin (float): value min in colorbar
+        vmax (float): max value in colorbar
+        
+    Dependencies:
+    plot_cities_expats, 
+    plot_local_dfg
+    
+    """
+    from mpl_style import plot_cities_expats
+    
+    # Plot the map of MSG channels vs lat/lon
+    fig = plt.figure(figsize=(10,10))
+    ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+    ax.spines["top"].set_linewidth(3)
+    ax.spines["right"].set_linewidth(3)
+    ax.spines["bottom"].set_linewidth(3)
+    ax.spines["left"].set_linewidth(3)
+    ax.set_extent(domain)
+    
+    
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, alpha=0.5)
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.xlabel_style = {'fontsize': 14}
+    gl.ylabel_style = {'fontsize': 14}
+    
+    
+
+    var_levels = np.linspace(vmin, vmax, 20)
+    # plot 10th percentile as filled contours
+    mesh = ax.contourf(lons, 
+                        lats, 
+                        variable, 
+                        cmap=cmap, 
+                        transform=ccrs.PlateCarree(), 
+                        levels=var_levels, 
+                        vmin=vmin, # 230
+                        vmax=vmax) # 270
+    cbar = plt.colorbar(mesh, label=cbar_title, shrink=0.6)
+
+    ax.add_feature(cfeature.LAKES)
+    ax.add_feature(cfeature.RIVERS)
+    
+     #vmin, vmax=220.,
+    plt.tick_params(axis='both',which='major',labelsize=14)
+
+    ax.set_xlabel('Latitude [$^{\circ}$]')
+    ax.set_ylabel('Longitude [$^{\circ}$]')
+    ax.tick_params(which='minor', length=5, width=2)
+    ax.tick_params(which='major', length=7, width=3)
+    #cbar = plt.colorbar(pc,ax=ax,shrink=0.75)
+    #cbar.set_label(label, fontsize=14)
+    #cbar.ax.tick_params(labelsize=14)
+
+    ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=1.5, color='black')
+    #ax.add_feature(cfeature.STATES, linewidth=0.2)
+    ax.add_feature(cfeature.BORDERS, linewidth=1.5, color='black')
+
+    # Title and save date_str+'_IR108'
+    ax.set_title(label, fontsize=12)
+    
+    if key =='expats':
+        plot_cities_expats(ax, 'grey', 50)
+    elif key == 'dfg':
+        plot_local_dfg(ax, 'black', 50)
+        
+        
+    plt.savefig(
+        os.path.join(path_out, label+"_"+key+".png"),
+        dpi=300,
+        bbox_inches="tight",
+        transparent=back_transparent,
+        )
+
+    plt.close()
+#f"{i:03d}"
+
+    
+    
+    
+def gif_maker(image_folder, gif_name, gif_path, gif_duration, channel, png_string):
+    """
+    script to create animated gif from a folder containing images
+
+    Args:
+        image_folder (string): folder containing png images
+        gif_name (string): string as filename for gif
+        gif_path (string): path for gif file
+        gif_duration (int): duration for gif (typical 250)
+        channel(string): variable string for the gif
+        png_string (string): string to filter images, e.g. "_IR_108_expats.png" or "_OPERA_reflectivity.png"
+
+    """
+    from PIL import Image
+    import glob
+    
+    import matplotlib.pyplot as plt
+    
+
+    
+    # read files into the fil elist
+    image_array = []
+        
+    
+    for file in sorted(glob.glob(image_folder+'*'+png_string)):
+                
+        image = Image.open(file)
+        image_array.append(image)
+
+    im = image_array[0]            
+    im.save(gif_path+gif_name+".gif", 
+            format='png',
+            save_all=True, 
+            append_images=image_array, 
+            duration=gif_duration, 
+            loop=0)
+    
+
+    
+    return
+
+def convert_gif_to_mp4(gif_path, mp4_path):
+    """
+    Converts a GIF file to MP4 format using ffmpeg.
+    
+    Args:
+        gif_path (str): Path to the input GIF file.
+        mp4_path (str): Path where the output MP4 file will be saved.
+    """
+    import os
+    import subprocess
+
+    # Root directory containing GIFs
+    input_root = gif_path
+
+    # Directory where MP4s will be saved
+    output_root = mp4_path
+    os.makedirs(output_root, exist_ok=True)
+
+    # Output video settings
+    output_fps = 10
+
+    for dirpath, _, filenames in os.walk(input_root):
+        for filename in filenames:
+            if filename.lower().endswith(".gif"):
+                gif_path = os.path.join(dirpath, filename)
+
+                # Get relative path from input_root and use it to build output path
+                rel_path = os.path.relpath(dirpath, input_root)
+                output_dir = os.path.join(output_root, rel_path)
+                os.makedirs(output_dir, exist_ok=True)
+
+                mp4_filename = os.path.splitext(filename)[0] + ".mp4"
+                mp4_path = os.path.join(output_dir, mp4_filename)
+
+                if os.path.exists(mp4_path):
+                    print(f"🔁 Skipping existing MP4: {mp4_path}")
+                    continue
+
+                print(f"🎞️ Converting: {gif_path} -> {mp4_path}")
+
+                try:
+                    subprocess.run([
+                        "ffmpeg",
+                        "-y",  # overwrite output if needed
+                        "-i", gif_path,
+                        "-vf", f"fps={output_fps},pad=ceil(iw/2)*2:ceil(ih/2)*2",  # even dimensions
+                        "-c:v", "libx264",
+                        "-preset", "slow",         # compression trade-off: slower = smaller file
+                        "-crf", "32",
+                        "-pix_fmt", "yuv420p",
+                        "-movflags", "faststart",
+                        mp4_path
+                    ], check=True)
+                    print(f"✅ Saved MP4: {mp4_path}")
+                except subprocess.CalledProcessError as e:
+                    print(f"❌ FFmpeg failed for {gif_path}: {e}")
+
