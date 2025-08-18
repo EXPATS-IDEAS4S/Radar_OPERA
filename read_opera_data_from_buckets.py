@@ -13,6 +13,8 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
 
+from test_msg_opera_single_time_stamp import extract_strings_from_date
+
 # Import S3 credentials
 from credentials_buckets import S3_BUCKET_NAME, S3_ACCESS_KEY, S3_SECRET_ACCESS_KEY, S3_ENDPOINT_URL
 from aux_funcs import list_s3_files, print_h5_structure, read_h5_from_s3, merge_and_save_netcdf, plot_reflectivity_histogram, plot_data, open_with_wrl
@@ -35,8 +37,8 @@ s3 = boto3.client(
 years = range(2013, 2017)
 months = range(4, 10)
 
-out_dir_maps = '/data1/fig/OPERA/original_reflectivity_maps'
-out_dir_hist = '/data1/fig/OPERA/reflectivity_hists'
+out_dir_maps = '/home/claudia/figs/OPERA/original_reflectivity_maps'
+out_dir_hist = '/home/claudia/figs/OPERA/reflectivity_hists'
 
 # Collect matching files
 datasets = {}
